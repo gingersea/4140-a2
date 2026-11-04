@@ -1,0 +1,5 @@
+models/
+checkpoints/
+*.log
+data/emb/
+__pycache__/
