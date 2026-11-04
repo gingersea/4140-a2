@@ -1,82 +1,86 @@
-\documentclass[11pt]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage{booktabs}
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
 \usepackage{amsmath}
-\usepackage[T1]{fontenc}
+\usepackage{booktabs}
 
-\title{\vspace{-1.5em}AIST4010 Assignment 2: Antibiotic Resistance Gene (ARG) Classification\\[0.3em]
-\large Experiment Report}
-\author{Jiang Huanyun}
-\date{November 4, 2026}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
 
 \begin{document}
-\maketitle
-\vspace{-2.5em}
+
+\begin{center}
+{\large AIST4010: Foundation of Applied Deep Learning}\\[3pt]
+{\large Assignment 2 (Kaggle): ARG Classification}\\[10pt]
+Name: JIANG Huanyun \qquad Student ID: 1155233165
+\end{center}
 
 \section*{1 What the task was}
 
 15-class protein sequence classification from amino-acid FASTA: given a
-protein, predict whether it is an antibiotic resistance gene (ARG) and, if
-so, which of 14 antibiotic families it confers resistance to (aminoglycoside,
-MLS, polymyxin, fosfomycin, trimethoprim, bacitracin, quinolone, multidrug,
-chloramphenicol, tetracycline, rifampin, beta\_lactam, sulfonamide,
-glycopeptide; label 14 = non-ARG). Train 21{,}209 sequences (10{,}067 ARG
-with drug annotation, 11{,}142 non-ARG), val 4{,}387 (same skewed mix),
-test 4{,}469. Metric is accuracy, and the test set is \emph{class-balanced}
-($\sim$298 per class). I ended with a two-model ensemble of class-balanced
-logistic-regression probes on ESM-2 650M and 3B embeddings: 98.10\% accuracy
-on a balanced proxy of val (macro-F1 0.9753).
+protein, predict whether it is an antibiotic resistance gene (ARG) and,
+if so, which of 14 antibiotic families it confers resistance to
+(aminoglycoside, MLS, polymyxin, fosfomycin, trimethoprim, bacitracin,
+quinolone, multidrug, chloramphenicol, tetracycline, rifampin,
+beta\_lactam, sulfonamide, glycopeptide; label 14 = non-ARG). Train
+21{,}209 sequences (10{,}067 ARG with drug annotation, 11{,}142
+non-ARG), val 4{,}387 (same skewed mix), test 4{,}469. Metric is
+accuracy, and the test set is \emph{class-balanced} ($\sim$298 per
+class). I ended with a two-model ensemble of class-balanced
+logistic-regression probes on ESM-2 650M and 3B embeddings: 98.10\%
+accuracy on a balanced proxy of val (macro-F1 0.9753).
 
 \section*{2 What I tried, in order}
 
-(See Table~1 at the end of the document.)
+(See Table 1 at the end of the document.)
 
 \section*{3 Things that broke and how I fixed them}
 
 \subsection*{3.1 Misreading the task as binary classification}
 
 The training headers split ARG proteins by drug family
-(\texttt{>id|FEATURES|src|drug|gene|mechanism|label}), and I initially read
-the task as a binary ARG-vs-non-ARG problem, training on the trailing 0/1.
-The first submission scored 0.94\%. The sample\_submission file shows 15
-distinct labels (0--14). I then found the same assignment from Spring 2024
-and another student's 2026 repo: the label space is 14 drug families plus
-non-ARG, 15 classes in total, and this year's mapping matches the 2024
-one. Lesson: before modeling, check the label vocabulary of the submission
-template---it defines the problem, not the training-file format.
+(\texttt{>id|FEATURES|src|drug|gene|mechanism|label}), and I initially
+read the task as a binary ARG-vs-non-ARG problem, training on the
+trailing 0/1. The first submission scored 0.94\%. The
+sample\_submission file shows 15 distinct labels (0--14). I then found
+the same assignment from Spring 2024 and another student's 2026 repo:
+the label space is 14 drug families plus non-ARG, 15 classes in total,
+and this year's mapping matches the 2024 one. Lesson: before modeling,
+check the label vocabulary of the submission template---it defines the
+problem, not the training-file format.
 
 \subsection*{3.2 Validating on a skewed val fooled me twice}
 
-Train and val share the same skewed mix (52\% non-ARG), but the test set is
-balanced. Every model that learned the training prior scored great on val
-(98.8--99.1\%) but produced heavily non-ARG-skewed test predictions. On a
-balanced test that caps accuracy at $\sum_c \min(p_c, 298)/4469 \approx
-38\%$ --- my second submission regressed. Two fixes: (i) train with
-\emph{inverse-frequency class weights} so the model learns a uniform prior
-that matches the test; (ii) evaluate on a \emph{balanced proxy} of val
-(uniform 200 per class) and select models/weights by macro-F1 there, never
-by raw val accuracy.
+Train and val share the same skewed mix (52\% non-ARG), but the test set
+is balanced. Every model that learned the training prior scored great on
+val (98.8--99.1\%) but produced heavily non-ARG-skewed test predictions.
+On a balanced test that caps accuracy at
+$\sum_c \min(p_c, 298)/4469 \approx 38\%$ --- my second submission
+regressed. Two fixes: (i) train with \emph{inverse-frequency class
+weights} so the model learns a uniform prior that matches the test;
+(ii) evaluate on a \emph{balanced proxy} of val (uniform 200 per class)
+and select models/weights by macro-F1 there, never by raw val accuracy.
 
 \subsection*{3.3 Fine-tuning hurt instead of helping}
 
-LoRA fine-tuning of ESM-2 650M with a class-balanced cross-entropy reached
-98.43\% raw val accuracy (macro-F1 0.954), and ensembling it with the
-probe models pushed raw val accuracy to 99.13\% --- a number that looks
-great but is distribution-mismatched. On the balanced proxy, the
-fine-tuned model (97.47\%) was \emph{worse} than the plain balanced probe
-(98.10\%), and adding it to the ensemble never helped. The fine-tuner
-overfits the skewed training distribution; freezing ESM-2 and fitting a
-linear probe regularizes better at this data scale.
+LoRA fine-tuning of ESM-2 650M with a class-balanced cross-entropy
+reached 98.43\% raw val accuracy (macro-F1 0.954), and ensembling it
+with the probe models pushed raw val accuracy to 99.13\% --- a number
+that looks great but is distribution-mismatched. On the balanced proxy,
+the fine-tuned model (97.47\%) was \emph{worse} than the plain balanced
+probe (98.10\%), and adding it to the ensemble never helped. The
+fine-tuner overfits the skewed training distribution; freezing ESM-2 and
+fitting a linear probe regularizes better at this data scale.
 
 \subsection*{3.4 Small bugs}
 
 \begin{itemize}
-\item \texttt{liblinear} doesn't support multiclass; the first 15-class
+\item \texttt{liblinear} does not support multiclass; the first 15-class
 probe crashed, switched to \texttt{lbfgs}.
-\item 3B checkpoint lacks tokenizer files (huggingface layout) --- copied
-vocab/special tokens from the 650M checkpoint.
+\item 3B checkpoint lacks tokenizer files (huggingface layout) ---
+copied vocab/special tokens from the 650M checkpoint.
 \item hf-mirror rate-limits (429) and huggingface.co direct TLS resets;
-eventually downloaded the 3B shards with plain \texttt{curl -C -} resume.
+eventually downloaded the 3B shards with plain \texttt{curl -C -}
+resume.
 \end{itemize}
 
 \section*{4 What worked and what didn't}
@@ -88,8 +92,8 @@ eventually downloaded the 3B shards with plain \texttt{curl -C -} resume.
 single biggest jump over the k-mer baseline's 94.7\%);
 \item class-balanced training (fixes the train/test prior mismatch, the
 difference between 38\%-capped and 98\%);
-\item balanced-proxy evaluation (the model selector that prevents choosing
-skewed-prior models);
+\item balanced-proxy evaluation (the model selector that prevents
+choosing skewed-prior models);
 \item ensembling the 650M and 3B probes 1:1 (+0.3 on balanced proxy via
 error decorrelation);
 \item 3-mer TF-IDF + LR as a cheap diversity member and sanity baseline.
@@ -98,8 +102,8 @@ error decorrelation);
 \subsection*{4.2 Didn't work}
 
 \begin{enumerate}
-\item fine-tuning ESM-2 (LoRA) as a member of the ensemble (worse than the
-probe, no ensemble gain);
+\item fine-tuning ESM-2 (LoRA) as a member of the ensemble (worse than
+the probe, no ensemble gain);
 \item ESM-2 3B probe alone (no gain over 650M; only helps in the
 ensemble);
 \item 4-gram features (no gain over 3-gram);
@@ -110,21 +114,20 @@ post-hoc fix instead of class-weighted training.
 \subsection*{4.3 What I took away from it}
 
 \begin{itemize}
-\item The submission template's label distribution is part of the problem
-specification: it reveals the test prior, and a model that ignores it can
-look great locally and fail on the leaderboard.
-\item For skewed-train/balanced-test setups, pick models by macro-F1 on a
-balanced proxy of the validation set --- raw accuracy on the skewed val is
-a biased selector.
+\item The submission template's label distribution is part of the
+problem specification: it reveals the test prior, and a model that
+ignores it can look great locally and fail on the leaderboard.
+\item For skewed-train/balanced-test setups, pick models by macro-F1 on
+a balanced proxy of the validation set --- raw accuracy on the skewed
+val is a biased selector.
 \item Frozen pretrained embeddings + linear probe beat end-to-end
 fine-tuning when the label distribution is skewed and the task is
 near-linearly separable.
-\item ``Strong and different'' still applies: the two probes share the same
-architecture but different ESM-2 scales, and their errors decorrelate
-enough to pay off.
+\item ``Strong and different'' still applies: the two probes share the
+same architecture but different ESM-2 scales, and their errors
+decorrelate enough to pay off.
 \end{itemize}
 
-\newpage
 \begin{table}[h]
 \centering
 \small
@@ -132,18 +135,28 @@ enough to pay off.
 \toprule
 \# & Method & Balanced-proxy acc & Worked? & Notes \\
 \midrule
-1 & 3-mer TF-IDF + LR, 15 classes & 94.73\% & baseline & fast sanity check; non-ARG vs multidrug confusion dominates \\
-2 & ESM-2 650M embeddings + LR & 97.82\% & yes & frozen embeddings are already near-linearly separable \\
-3 & ESM-2 650M + LoRA fine-tune (class-weighted) & 97.47\% & no & overfits skewed train prior; worse than the probe \\
+1 & 3-mer TF-IDF + LR, 15 classes & 94.73\% & baseline & fast sanity
+check; non-ARG vs multidrug confusion dominates \\
+2 & ESM-2 650M embeddings + LR & 97.82\% & yes & frozen embeddings are
+already near-linearly separable \\
+3 & ESM-2 650M + LoRA fine-tune (class-weighted) & 97.47\% & no &
+overfits skewed train prior; worse than the probe \\
 4 & 4-gram features added & -- & no & no gain over 3-gram \\
-5 & ESM-2 3B embeddings + LR & 98.17\% & slightly & $\sim$equal to 650M alone; gains only in the ensemble \\
-6 & 650M + 3B probe ensemble (1:1) & 98.10\% & yes & error decorrelation between model scales \\
-7 & probe + fine-tune + k-mer ensemble & 97.8--98.0\% & no & fine-tuner drags the ensemble down \\
-8 & class-balanced training (inverse-freq weights) & -- & yes & the fix for the skewed-prior problem \\
-9 & balanced-proxy model selection & -- & yes & the selector that exposed the val illusion \\
+5 & ESM-2 3B embeddings + LR & 98.17\% & slightly & $\sim$equal to
+650M alone; gains only in the ensemble \\
+6 & 650M + 3B probe ensemble (1:1) & 98.10\% & yes & error
+decorrelation between model scales \\
+7 & probe + fine-tune + k-mer ensemble & 97.8--98.0\% & no &
+fine-tuner drags the ensemble down \\
+8 & class-balanced training (inverse-freq weights) & -- & yes & the fix
+for the skewed-prior problem \\
+9 & balanced-proxy model selection & -- & yes & the selector that
+exposed the val illusion \\
 \bottomrule
 \end{tabular}
-\caption{Experiment log. Balanced-proxy acc: accuracy on a uniform 200-per-class subsample of val (the best available proxy for the balanced test set).}
+\caption{Experiment log. Balanced-proxy acc: accuracy on a uniform
+200-per-class subsample of val (the best available proxy for the
+balanced test set).}
 \end{table}
 
 \end{document}
